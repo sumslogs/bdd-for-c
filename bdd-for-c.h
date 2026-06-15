@@ -31,14 +31,9 @@ SOFTWARE.
   #include <io.h>
   #define __BDD_IS_ATTY__() _isatty(_fileno(stdout))
 #else
-  #ifndef _POSIX_C_SOURCE
-    // This definition is required for `fileno` to be defined
-    #define _POSIX_C_SOURCE 200809
-  #endif
   #include <stdio.h>
   #include <unistd.h>
-  #include <term.h>
-  #define __BDD_IS_ATTY__() isatty(fileno(stdout))
+  #define __BDD_IS_ATTY__() isatty(1)
 #endif
 
 #include <stddef.h>
@@ -385,100 +380,73 @@ void __bdd_run__(__bdd_config_type__ *config) {
         return;
     }
 
-    bool skipped = false;
-    if (step->type == __BDD_NODE_TEST__) {
-        if (config->has_focus_nodes && !(step->flags & __bdd_node_flags_focus__)) {
-          skipped = true;
-        } else if (step->flags & __bdd_node_flags_skip__) {
-          skipped = true;
-        }
-        ++config->test_tap_index;
-        // Print the step name before running the test so it is visible
-        // even if the test itself crashes.
-        if ((!skipped || !config->has_focus_nodes) && config->run == __BDD_TEST_RUN__ && !config->use_tap) {
-          __bdd_indent__(stdout, step->level);
-          printf("%s ", step->name);
-        }
+    __bdd_test_main__(config);
+}
 
-        if (!skipped) {
-          __bdd_test_main__(config);
-        }
-
-        if (skipped) {
-            if (config->run == __BDD_TEST_RUN__) {
-                if (!config->has_focus_nodes) {
-                  if (config->use_tap) {
-                      // We only to report tests and not setup / teardown success
-                      if (config->test_tap_index) {
-                          printf("skipped %zu - %s\n", config->test_tap_index, step->name);
-                      }
-                  } else {
-                      printf(
-                          "%s(SKIP)%s\n",
-                          config->use_color ? __BDD_COLOR_YELLOW__ : "",
-                          config->use_color ? __BDD_COLOR_RESET__ : ""
-                      );
-                  }
-                }
-            }
-        } else if (config->error == NULL) {
-            if (config->run == __BDD_TEST_RUN__) {
-                if (config->use_tap) {
-                    // We only to report tests and not setup / teardown success
-                    if (config->test_tap_index) {
-                        printf("ok %zu - %s\n", config->test_tap_index, step->name);
-                    }
-                } else {
-                    printf(
-                        "%s(OK)%s\n",
-                        config->use_color ? __BDD_COLOR_GREEN__ : "",
-                        config->use_color ? __BDD_COLOR_RESET__ : ""
-                    );
-                }
-            }
-        } else {
-            ++config->failed_test_count;
+void __bdd_test_report__(__bdd_config_type__ *config, __bdd_test_step__ *step, bool skipped) {
+    if (skipped) {
+        if (!config->has_focus_nodes) {
             if (config->use_tap) {
-                // We only to report tests and not setup / teardown errors
                 if (config->test_tap_index) {
-                    printf("not ok %zu - %s\n", config->test_tap_index, step->name);
+                    printf("skipped %zu - %s\n", config->test_tap_index, step->name);
                 }
             } else {
                 printf(
-                    "%s(FAIL)%s\n",
-                    config->use_color ? __BDD_COLOR_RED__ : "",
+                    "%s(SKIP)%s\n",
+                    config->use_color ? __BDD_COLOR_YELLOW__ : "",
                     config->use_color ? __BDD_COLOR_RESET__ : ""
                 );
-                __bdd_indent__(stdout, step->level + 1);
-                printf("%s\n", config->error);
-                __bdd_indent__(stdout, step->level + 2);
-                printf("%s\n", config->location);
             }
-            free(config->error);
-            config->error = NULL;
         }
-    } else if (!skipped) {
-      __bdd_test_main__(config);
+    } else if (config->error == NULL) {
+        if (config->use_tap) {
+            if (config->test_tap_index) {
+                printf("ok %zu - %s\n", config->test_tap_index, step->name);
+            }
+        } else {
+            printf(
+                "%s(OK)%s\n",
+                config->use_color ? __BDD_COLOR_GREEN__ : "",
+                config->use_color ? __BDD_COLOR_RESET__ : ""
+            );
+        }
+    } else {
+        ++config->failed_test_count;
+        if (config->use_tap) {
+            if (config->test_tap_index) {
+                printf("not ok %zu - %s\n", config->test_tap_index, step->name);
+            }
+        } else {
+            printf(
+                "%s(FAIL)%s\n",
+                config->use_color ? __BDD_COLOR_RED__ : "",
+                config->use_color ? __BDD_COLOR_RESET__ : ""
+            );
+            __bdd_indent__(stdout, step->level + 1);
+            printf("%s\n", config->error);
+            __bdd_indent__(stdout, step->level + 2);
+            printf("%s\n", config->location);
+        }
+        free(config->error);
+        config->error = NULL;
     }
 }
 
 char *__bdd_vformat__(const char *format, va_list va) {
-    // First we over-allocate
-    const size_t size = 2048;
-    char *result = calloc(size, sizeof(char));
+    va_list va2;
+    va_copy(va2, va);
+    int len = vsnprintf(NULL, 0, format, va2);
+    va_end(va2);
+    if (len < 0) {
+        perror("vsnprintf");
+        abort();
+    }
+    char *result = malloc((size_t)len + 1);
     if (!result) {
-        perror("calloc(result)");
+        perror("malloc(result)");
         abort();
     }
-    vsnprintf(result, size - 1, format, va);
-
-    // Then clip to an actual size
-    void* r = realloc(result, strlen(result) + 1);
-    if (!r) {
-        perror("realloc(result)");
-        abort();
-    }
-    result = r;
+    vsnprintf(result, (size_t)len + 1, format, va);
     return result;
 }
 
@@ -575,7 +543,51 @@ int main(void) {
         config.node_stack->size = 1;
         config.id = 0;
         config.current_test = step;
-        __bdd_run__(&config);
+
+        if (step->type != __BDD_NODE_TEST__) {
+            __bdd_run__(&config);
+            continue;
+        }
+
+        bool skipped = false;
+        if (config.has_focus_nodes && !(step->flags & __bdd_node_flags_focus__)) {
+            skipped = true;
+        } else if (step->flags & __bdd_node_flags_skip__) {
+            skipped = true;
+        }
+        ++config.test_tap_index;
+
+        if ((!skipped || !config.has_focus_nodes) && !config.use_tap) {
+            __bdd_indent__(stdout, step->level);
+            printf("%s ", step->name);
+        }
+
+        if (!skipped) {
+            __bdd_test_main__(&config);
+        }
+
+        while (i + 1 < steps->size) {
+            __bdd_test_step__ *next = steps->values[i + 1];
+            if (next->type != __BDD_NODE_INTERIM__) break;
+            if (strncmp(next->name, "after", 5) != 0) break;
+            ++i;
+            if (!skipped) {
+                char *prev_error = config.error;
+                char *prev_location = config.location;
+                config.error = NULL;
+                config.node_stack->size = 1;
+                config.id = 0;
+                config.current_test = next;
+                __bdd_test_main__(&config);
+                if (prev_error) {
+                    free(config.error);
+                    config.error = prev_error;
+                    config.location = prev_location;
+                }
+            }
+        }
+
+        __bdd_test_report__(&config, step, skipped);
     }
 
     for (size_t i = 0; i < config.nodes->size; ++i) {
@@ -608,13 +620,13 @@ void __bdd_test_main__ (__bdd_config_type__ *__bdd_config__)\
 
 #define __BDD_NODE__(flags, node_list, type, ...)\
 for(\
-    bool __bdd_has_run__ = 0;\
+    bool __BDD_CONCAT__(__bdd_has_run_, __LINE__) = 0;\
     (\
-      !__bdd_has_run__ && \
+      !__BDD_CONCAT__(__bdd_has_run_, __LINE__) && \
       __bdd_enter_node__(flags, __bdd_config__, (type), offsetof(struct __bdd_node__, node_list), __VA_ARGS__) \
     );\
     __bdd_exit_node__(__bdd_config__), \
-    __bdd_has_run__ = 1 \
+    __BDD_CONCAT__(__bdd_has_run_, __LINE__) = 1 \
 )
 
 #define describe(...) __BDD_NODE__(__bdd_node_flags_none__, list_children, __BDD_NODE_GROUP__, __VA_ARGS__)
@@ -636,12 +648,15 @@ for(\
 #define __BDD_OVERLOAD__(macro_name, suffix) __BDD_EXPAND_OVERLOAD__(macro_name, suffix)
 #define __BDD_EXPAND_OVERLOAD__(macro_name, suffix) macro_name##suffix
 
-#define __BDD_COUNT_ARGS__(...) __BDD_PATTERN_MATCH__(__VA_ARGS__,_,_,_,_,_,_,_,_,_,ONE__)
+#define __BDD_COUNT_ARGS__(...) __BDD_PATTERN_MATCH__(__VA_ARGS__,_,_,_,_,_,_,_,_,_,ONE__,_)
 #define __BDD_PATTERN_MATCH__(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,N, ...) N
 
 #define __BDD_STRING_HELPER__(x) #x
 #define __BDD_STRING__(x) __BDD_STRING_HELPER__(x)
 #define __STRING__LINE__ __BDD_STRING__(__LINE__)
+
+#define __BDD_CONCAT_IMPL__(a, b) a##b
+#define __BDD_CONCAT__(a, b) __BDD_CONCAT_IMPL__(a, b)
 
 #define __BDD_FMT_COLOR__ __BDD_COLOR_RED__ "Check failed:" __BDD_COLOR_RESET__ " %s"
 #define __BDD_FMT_PLAIN__ "Check failed: %s"

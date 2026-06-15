@@ -19,6 +19,7 @@ spec("test tree") {
         check(n->before_each != NULL);
         check(n->after_each != NULL);
         check(n->children != NULL);
+        _bdd_node_free(n);
     }
 
     it("should say that the node is a leaf if it has no children") {
@@ -27,12 +28,14 @@ spec("test tree") {
         _bdd_node *child = _bdd_node_create("bar");
         _bdd_array_push(root->children, child);
         check(_bdd_node_is_leaf(root) == false);
+        _bdd_node_free(root);
     }
 
     it("should flatten NULL to an empty list") {
         _bdd_array * names = _bdd_array_create();
         _bdd_node_flatten(NULL, names);
         check(names->size == 0);
+        _bdd_array_free(names);
     }
 
     it("should add `before` strings before any other when flattening") {
@@ -48,6 +51,8 @@ spec("test tree") {
         check(_bdd_same_string((char *) names->values[0], "before1"));
         check(_bdd_same_string((char *) names->values[1], "before2"));
         check(_bdd_same_string((char *) names->values[2], "child"));
+        _bdd_array_free(names);
+        _bdd_node_free(root);
     }
 
     it("should add `before_each` and `after_each` strings before and after each leaf node") {
@@ -67,6 +72,8 @@ spec("test tree") {
         check(_bdd_same_string((char *) names->values[3], "before_each"));
         check(_bdd_same_string((char *) names->values[4], "child2"));
         check(_bdd_same_string((char *) names->values[5], "after_each"));
+        _bdd_array_free(names);
+        _bdd_node_free(root);
     }
 
     it("should support nested nodes") {
@@ -83,5 +90,7 @@ spec("test tree") {
         check(_bdd_same_string((char *) names->values[0], "before_each"));
         check(_bdd_same_string((char *) names->values[1], "child"));
         check(_bdd_same_string((char *) names->values[2], "after_each"));
+        _bdd_array_free(names);
+        _bdd_node_free(root);
     }
 }

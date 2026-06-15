@@ -1,7 +1,7 @@
 #ifndef BDD_TEST_TREE_H
 #define BDD_TEST_TREE_H
 
-#include <memory.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include "array.h"
@@ -24,6 +24,25 @@ _bdd_node* _bdd_node_create(char *name) {
     n->after_each = _bdd_array_create();
     n->children = _bdd_array_create();
     return n;
+}
+
+void _bdd_node_free(_bdd_node *node) {
+    for (size_t i = 0; i < node->before->size; ++i)
+        _bdd_node_free(node->before->values[i]);
+    for (size_t i = 0; i < node->after->size; ++i)
+        _bdd_node_free(node->after->values[i]);
+    for (size_t i = 0; i < node->before_each->size; ++i)
+        _bdd_node_free(node->before_each->values[i]);
+    for (size_t i = 0; i < node->after_each->size; ++i)
+        _bdd_node_free(node->after_each->values[i]);
+    for (size_t i = 0; i < node->children->size; ++i)
+        _bdd_node_free(node->children->values[i]);
+    _bdd_array_free(node->before);
+    _bdd_array_free(node->after);
+    _bdd_array_free(node->before_each);
+    _bdd_array_free(node->after_each);
+    _bdd_array_free(node->children);
+    free(node);
 }
 
 bool _bdd_node_is_leaf(_bdd_node * node) {
@@ -77,7 +96,11 @@ _bdd_array * _bdd_node_flatten(_bdd_node * node, _bdd_array * names) {
         return names;
     }
 
-    _bdd_node_flatten_internal(node, names, _bdd_array_create(), _bdd_array_create());
+    _bdd_array *before_each_lists = _bdd_array_create();
+    _bdd_array *after_each_lists = _bdd_array_create();
+    _bdd_node_flatten_internal(node, names, before_each_lists, after_each_lists);
+    _bdd_array_free(before_each_lists);
+    _bdd_array_free(after_each_lists);
 
     return names;
 }
